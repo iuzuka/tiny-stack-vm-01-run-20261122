@@ -30,7 +30,10 @@ function run(p: Uint8Array, inp: Uint8Array): { o: Uint8Array; c: number } {
   const M = new Int32Array(256);
   const out = new Uint8Array(OUT_MAX);
   let ol = 0, ip = 0, pc = 0, steps = 0;
-  const end = (c: number): { o: Uint8Array; c: number } => ({ o: out.slice(0, ol), c });
+  // Return a view, not a copy: out is freshly allocated per run() call
+  // and the harness writes r.o to disk synchronously before the next
+  // run(), so no aliasing across instances is possible.
+  const end = (c: number): { o: Uint8Array; c: number } => ({ o: out.subarray(0, ol), c });
   for (;;) {
     if (steps === STEP_LIMIT) return end(10);
     if (pc < 0 || pc >= n) return end(9);
