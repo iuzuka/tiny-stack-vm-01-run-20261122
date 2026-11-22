@@ -8,7 +8,6 @@ import { join } from 'node:path';
 
 const STEP_LIMIT = 1_000_000;
 const OUT_MAX = 65_536;
-const enc = new TextEncoder();
 
 // Opcode table: V valid, I immediate bytes, P pops, U pushes.
 const V = new Uint8Array(84), I = new Uint8Array(84), P = new Uint8Array(84), U = new Uint8Array(84);
@@ -109,9 +108,23 @@ function run(p: Uint8Array, inp: Uint8Array): { o: Uint8Array; c: number } {
         break;
       }
       case 0x50: {
-        const b = enc.encode(String(D[sp - 1]));
-        if (ol + b.length > OUT_MAX) return end(11);
-        sp--; out.set(b, ol); ol += b.length;
+        // Write the decimal digits straight into the output buffer: no
+        // TextEncoder allocation and no intermediate string per PRINT.
+        // The length is counted first, so the output-limit trap still
+        // writes nothing when the value would not fit.
+        const v = D[sp - 1];
+        const neg = v < 0;
+        let mag = neg ? -v : v;
+        let digits = 1;
+        for (let t = mag; t >= 10; t = (t / 10) | 0) digits++;
+        const len = digits + (neg ? 1 : 0);
+        if (ol + len > OUT_MAX) return end(11);
+        sp--;
+        let pos = ol + len;
+        if (mag === 0) out[--pos] = 48;
+        while (mag > 0) { out[--pos] = 48 + (mag % 10); mag = (mag / 10) | 0; }
+        if (neg) out[--pos] = 45;
+        ol += len;
         break;
       }
       case 0x51:
@@ -127,7 +140,9 @@ function run(p: Uint8Array, inp: Uint8Array): { o: Uint8Array; c: number } {
 const IN = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const OUT = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 for (const id of readdirSync(IN).sort()) {
-  const r = run(new Uint8Array(readFileSync(join(IN, id, 'program.bin'))), new Uint8Array(readFileSync(join(IN, id, 'input.bin'))));
+  // readFileSync returns a Buffer, which is a Uint8Array: pass it
+  // straight to run() instead of copying the program and input.
+  const r = run(readFileSync(join(IN, id, 'program.bin')), readFileSync(join(IN, id, 'input.bin')));
   mkdirSync(join(OUT, id), { recursive: true });
   writeFileSync(join(OUT, id, 'stdout.bin'), r.o);
   writeFileSync(join(OUT, id, 'exit.txt'), r.c + '\n');
